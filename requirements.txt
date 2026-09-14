@@ -1,0 +1,13 @@
+# Core
+torch>=2.0
+transformers>=4.40.0
+pandas
+numpy
+scikit-learn
+scipy
+joblib
+tqdm
+
+# Experiment tracking (used by the 3 fine-tuning scripts; set WANDB_MODE=disabled
+# to run fully offline without a wandb account -- see README "Running without wandb")
+wandb

@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite the paper below (and this repository for the software itself)."
+title: "Two-Stage Decomposition of Sporadic Cystitis Detection in Veterinary Clinical Text"
+type: software
+authors:
+  - family-names: "Martinez Iraola"
+    given-names: "David"
+    # TODO: add remaining co-authors before publishing
+preferred-citation:
+  type: article
+  title: "Two-Stage Decomposition of Sporadic Cystitis Detection in Veterinary Clinical Text"
+  authors:
+    - family-names: "Martinez Iraola"
+      given-names: "David"
+      # TODO: add remaining co-authors, venue, year, and DOI once the paper is public
+  # TODO: fill in journal/conference, year, volume, DOI when available
+references:
+  - type: article
+    title: "Domain Adaptation and Instance Selection for Disease Syndrome Classification over Veterinary Clinical Notes"
+    authors:
+      - family-names: "Hur"
+        given-names: "Brian"
+      - family-names: "Baldwin"
+        given-names: "Timothy"
+      - family-names: "Verspoor"
+        given-names: "Karin"
+      - family-names: "Hardefeldt"
+        given-names: "Laura"
+      - family-names: "Gilkerson"
+        given-names: "James"
+    year: 2020
+    collection-title: "Proceedings of the 19th SIGBioMed Workshop on Biomedical Language Processing (BioNLP @ ACL 2020)"
+    start: 156
+    end: 166
+    notes: "Introduces VetBERT / VetBERTDx, the base model this pipeline builds on."

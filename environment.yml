@@ -1,0 +1,17 @@
+name: sc-two-stage
+channels:
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.11
+  - pytorch
+  - pip
+  - pip:
+    - transformers>=4.40.0
+    - pandas
+    - numpy
+    - scikit-learn
+    - scipy
+    - joblib
+    - tqdm
+    - wandb
