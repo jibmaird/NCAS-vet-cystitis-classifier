@@ -1,5 +1,5 @@
 ---
-license: mit
+license: apache-2.0
 language:
 - en
 tags:
@@ -92,7 +92,7 @@ predictions and discarded — there is no single checkpoint corresponding to tha
 
 ## Citation
 
-See [`CITATION.cff`](https://github.com/jibmaird/sporadic-cystitis-two-stage/blob/main/CITATION.cff)
+See [`CITATION.cff`](https://github.com/jibmaird/NCAS-vet-cystitis-classifier/blob/main/CITATION.cff)
 in the companion repository. Please also cite VetBERT/VetBERTDx (Hur et al., 2020),
 which this pipeline builds on throughout.
 
@@ -100,10 +100,10 @@ which this pipeline builds on throughout.
 
 Training, evaluation, and reproduction code (including a synthetic-data quickstart) is
 available at:
-[https://github.com/jibmaird/sporadic-cystitis-two-stage](https://github.com/jibmaird/sporadic-cystitis-two-stage)
+[https://github.com/jibmaird/NCAS-vet-cystitis-classifier](https://github.com/jibmaird/NCAS-vet-cystitis-classifier)
 
 ## License
 
-MIT — see [LICENSE](https://github.com/jibmaird/sporadic-cystitis-two-stage/blob/main/LICENSE).
+Apache 2.0 — see [LICENSE](https://github.com/jibmaird/NCAS-vet-cystitis-classifier/blob/main/LICENSE).
 This does not cover the base VetBERTDx model (loaded at runtime from the Hugging Face
 Hub, not redistributed here) or the private annotation data used in the paper.
