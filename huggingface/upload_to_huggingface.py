@@ -29,9 +29,13 @@ Usage
         --model checkpoints/dh_crossattention_seed43.pt  --name dh_cross_attention.pt \
         --model checkpoints/dh_weighted_seed43.pt        --name dh_weighted.pt
 
-NOTE: this script is prepared ahead of release. Do not run it against real
-fine-tuned checkpoints until institutional review of releasing weights trained
-on real clinical data has cleared (see huggingface/README.md, "Status").
+The four paper checkpoints have already been published at
+https://huggingface.co/jibmaird/sporadic-cystitis-two-stage following
+institutional review of releasing weights trained on real clinical data (see
+huggingface/README.md, "Status"). Re-running this script is safe -- it will
+just overwrite the existing files with a new commit -- but is normally only
+needed if you're publishing your own checkpoints trained with this repo's
+scripts.
 """
 
 from __future__ import annotations
@@ -52,30 +56,38 @@ MODEL_CARD_PATH = Path(__file__).parent / "README.md"
 
 
 def verify_checkpoint(path: str) -> dict:
-    """Load and print checkpoint metadata without building the full model."""
+    """Load and print basic info about a checkpoint.
+
+    scripts/training/fine_tune_vetbert_dual_head.py and
+    fine_tune_multiknowledge_endtoend.py both save checkpoints via
+    `torch.save(model.state_dict(), ...)` -- a raw state_dict (an OrderedDict
+    of tensors), not a wrapper dict with training metadata. There is no
+    'fusion_strategy'/'seed'/'base_model' field stored in the file itself;
+    that information lives in the checkpoint's filename and the model card.
+    """
     print(f"\nVerifying checkpoint: {path}")
-    ckpt = torch.load(path, map_location="cpu", weights_only=False)
+    state_dict = torch.load(path, map_location="cpu", weights_only=True)
 
-    if not isinstance(ckpt, dict) or "model_state_dict" not in ckpt:
-        sys.exit(f"ERROR: {path} does not contain 'model_state_dict'. "
-                 "Expected a full checkpoint dict as produced by "
-                 "scripts/training/fine_tune_multiknowledge_endtoend.py or "
-                 "scripts/training/fine_tune_vetbert_dual_head.py.")
+    if not isinstance(state_dict, dict) or not state_dict:
+        sys.exit(f"ERROR: {path} is not a non-empty state_dict.")
 
-    n_params = sum(p.numel() for p in
-                   [v for k, v in ckpt["model_state_dict"].items() if v.dim() > 0])
+    tensors = {k: v for k, v in state_dict.items() if torch.is_tensor(v)}
+    if len(tensors) != len(state_dict):
+        sys.exit(f"ERROR: {path} contains non-tensor values; expected a raw "
+                 "model state_dict as produced by torch.save(model.state_dict(), ...).")
+
+    n_params = sum(v.numel() for v in tensors.values())
+    top_level_modules = sorted({k.split('.')[0] for k in tensors.keys()})
 
     info = {
-        "fusion_strategy": ckpt.get("fusion_strategy", "?"),
-        "seed":            ckpt.get("seed", "?"),
-        "base_model":      ckpt.get("base_model", "havocy28/VetBERTDx"),
-        "n_params":        n_params,
+        "n_keys": len(tensors),
+        "n_params": n_params,
+        "top_level_modules": top_level_modules,
     }
 
-    print(f"  Fusion strategy : {info['fusion_strategy']}")
-    print(f"  Seed            : {info['seed']}")
-    print(f"  Base model      : {info['base_model']}")
-    print(f"  Parameters      : {n_params:,}")
+    print(f"  Keys             : {info['n_keys']}")
+    print(f"  Parameters       : {n_params:,}")
+    print(f"  Top-level modules: {top_level_modules}")
     return info
 
 

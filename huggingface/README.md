@@ -35,25 +35,45 @@ imbalanced population) that the paper's two-stage pipeline gates behind the Stag
 signal at inference time (§5.4) — the checkpoint itself is unchanged by gating; gating
 is applied as a post-hoc veto using a separately-computed Stage-1 score.
 
-| Architecture | Fusion strategy | Role in paper |
-|---|---|---|
-| Multi-Knowledge | Gated | Best-performing configuration overall (§5.4) |
-| Multi-Knowledge | Cross-Modal | Second fusion family, §5.4 |
-| Dual-Head | Cross-Attention | §5.4 |
-| Dual-Head | Weighted | §5.4 |
+| Architecture | Fusion strategy | Seed | File | Size | Role in paper |
+|---|---|---|---|---|---|
+| Multi-Knowledge | Gated | 43 | `mk_gated_seed43.pt` | 829 MB | Best-performing configuration overall (§5.4) |
+| Multi-Knowledge | Cross-Modal | 42 | `mk_cross_modal_seed42.pt` | 831 MB | Second fusion family, §5.4 |
+| Dual-Head | Cross-Attention | 43 | `dh_cross_attention_seed43.pt` | 828 MB | §5.4 |
+| Dual-Head | Weighted | 43 | `dh_weighted_seed43.pt` | 829 MB | §5.4 |
 
 Both fusion families combine VetBERTDx's 768-dim CLS embedding with its 39-dim
 syndrome-probability vector (§3.2); Multi-Knowledge and Dual-Head differ in how the
 two representations are combined (see paper §4.3 for architecture details).
 
+Each file is a raw PyTorch `state_dict()` (not a wrapper dict) -- load it with the
+matching model class from the companion repository:
+
+```python
+import torch
+from huggingface_hub import hf_hub_download
+# from scripts/training/fine_tune_multiknowledge_endtoend.py (companion repo)
+from fine_tune_multiknowledge_endtoend import VetBERTMultiKnowledgeClassifier
+
+path = hf_hub_download("jibmaird/sporadic-cystitis-two-stage", "mk_gated_seed43.pt")
+model = VetBERTMultiKnowledgeClassifier(
+    base_model_path="havocy28/VetBERTDx", device=torch.device("cpu"), fusion_strategy="gated"
+)
+model.load_state_dict(torch.load(path, map_location="cpu", weights_only=True))
+model.eval()
+```
+
+For Dual-Head checkpoints, use `VetBERTDualHead` from
+`fine_tune_vetbert_dual_head.py` with the matching `fusion_strategy`
+(`cross_attention` or `weighted`) instead.
+
 ## Status
 
-**Checkpoints are not yet uploaded.** Release is pending institutional review of
-publishing weights fine-tuned on real clinical data (the training data itself is
-private and is not released here or in the companion GitHub repository). This model
-card is a placeholder prepared ahead of that review; filenames, checkpoint format, and
-per-architecture download instructions will be filled in once weights are approved for
-release.
+**Published.** All four checkpoints and this model card are live at
+[huggingface.co/jibmaird/sporadic-cystitis-two-stage](https://huggingface.co/jibmaird/sporadic-cystitis-two-stage),
+following institutional review of publishing weights fine-tuned on real clinical
+data. The training data itself remains private and is not released here or in the
+companion GitHub repository.
 
 Note: the paper's Stage-2-only VetBERT result (§4.2, §5.2) comes from 5-fold
 cross-validation, where each fold's model is trained purely to compute out-of-fold

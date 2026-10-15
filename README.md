@@ -157,13 +157,12 @@ of this release as not relevant to reproducing the paper's results.
 ## Pretrained models
 
 Checkpoints for the paper's four best-performing single-stage architectures
-(the ones fed into the two-stage pipeline evaluation, §5.4) are planned for
-release at [huggingface.co/jibmaird/sporadic-cystitis-two-stage](https://huggingface.co/jibmaird/sporadic-cystitis-two-stage),
-pending institutional review of releasing weights fine-tuned on real clinical
-data. See [`huggingface/README.md`](huggingface/README.md) for the model card
-(prepared ahead of release) and [`huggingface/upload_to_huggingface.py`](huggingface/upload_to_huggingface.py)
-for the upload script; this README will be updated with confirmed links once
-weights are approved and published.
+(the ones fed into the two-stage pipeline evaluation, §5.4) are published at
+[huggingface.co/jibmaird/sporadic-cystitis-two-stage](https://huggingface.co/jibmaird/sporadic-cystitis-two-stage):
+Multi-Knowledge Gated (seed 43), Multi-Knowledge Cross-Modal (seed 42),
+Dual-Head Cross-Attention (seed 43), and Dual-Head Weighted (seed 43). See
+[`huggingface/README.md`](huggingface/README.md) for the model card, file
+sizes, and a loading snippet.
 
 Note: the paper's Stage-2-only VetBERT result (§4.2, §5.2) comes from 5-fold
 cross-validation, where each fold's model is trained purely to compute
