@@ -13,8 +13,7 @@ fine-tuned fusion architectures) the two-stage pipeline is compared against.
 
 This is the companion code for:
 
-> *Two-Stage Decomposition of Sporadic Cystitis Detection in Veterinary
-> Clinical Text* [paper link -- to be completed once published]
+> *Sporadic Cystitis Detection in Veterinary Clinical Text* [paper link -- to be completed once published]
 
 Related work: [NCAS-GP-indication-classifier](https://github.com/jibmaird/NCAS-GP-indication-classifier)
 (SNOMED CT coding of antimicrobial-prescribing indications, the analogous
@@ -43,7 +42,7 @@ This repository decomposes them:
   imbalanced population.
 
 Explicitly gating Stage 2 behind Stage 1 at inference time removes most of
-that instability without retraining anything (§5.4 of the paper).
+that instability without retraining anything (§3.4 of the paper).
 
 **This repository does not include the real annotation data.** The paper's
 dataset is private veterinary clinical data (a single annotation batch,
@@ -77,8 +76,8 @@ Stage-1 gate -> Stage-2 CV -> a single-stage baseline -> two-stage stats):
 python tools/generate_synthetic_data.py --seed 0
 
 # 2. Derive the two label schemes used throughout the paper:
-#    - binary_SC:  Sporadic Cystitis vs. Other (single-stage baselines, §4.3)
-#    - binary:     Cystitis Sporadic vs. UTD Other, is_utd records only (Stage 2, §4.2)
+#    - binary_SC:  Sporadic Cystitis vs. Other (single-stage baselines, §2.6)
+#    - binary:     Cystitis Sporadic vs. UTD Other, is_utd records only (Stage 2, §2.5)
 python scripts/data_preparation/prepare_ann04062026_SC_data.py
 python scripts/data_preparation/prepare_ann04062026_data.py
 
@@ -110,13 +109,15 @@ python scripts/evaluation/evaluate_multiknowledge_ann04062026_SC.py \
 # 7. Two-stage evaluation, stats
 python scripts/evaluation/sc_bootstrap_ci.py
 python scripts/evaluation/sc_mcnemar_test.py
+# The paper's reported CIs come from sc_shared_bootstrap_ci.py, which needs the
+# seed-42/43/44 and ML prediction files from the full runs.
 ```
 
 `fine_tune_vetbert_dual_head.py` and `fine_tune_multiknowledge_endtoend.py`
 both accept `--fusion_strategy` (`concatenation|weighted|cross_attention|
 multi_task` for Dual-Head; `attention|gated|cross_modal|hierarchical` for
 Multi-Knowledge), `--seed`, `--epochs`, and `--checkpoint_name` -- the paper's
-multi-seed runs (§5.4) are produced by calling the same script three times
+multi-seed runs (§3.4) are produced by calling the same script three times
 with different `--seed`/`--checkpoint_name` values, not by any code branch.
 
 The three fine-tuning scripts log to [wandb](https://wandb.ai) during
@@ -169,13 +170,13 @@ repo as a package.
 
 | Paper section | Script(s) |
 |---|---|
-| §3.1 Data | `scripts/data_preparation/prepare_ann04062026{_SC,}_data.py` |
-| §4.1 Stage-1 gate | `scripts/evaluation/sc_cascade_step1_extract_utd_probs.py`, `sc_cascade_step1_utd_gate_leakfree.py` |
-| §4.2 Stage-2 CV | `scripts/evaluation/sc_stage2_extract_features.py`, `sc_stage2_ml_cv.py`, `sc_stage2_vetbert_cv.py` |
-| §4.3 Single-stage baselines | `scripts/training/train_evaluate_ml_ann04062026.py`, `fine_tune_on_cystitis_refined_binary.py`, `fine_tune_vetbert_dual_head.py`, `fine_tune_multiknowledge_endtoend.py`, and the matching `scripts/evaluation/evaluate_*_ann04062026_SC.py` |
-| §4.4 Two-stage pipeline | `scripts/evaluation/sc_cascade_gate_all_seeds.py`, `sc_two_stage_evaluation.py` |
-| §4.5 Stats | `scripts/evaluation/sc_bootstrap_ci.py`, `sc_mcnemar_test.py` |
-| §6.4 Error analysis | `scripts/evaluation/sc_error_analysis.py`, `sc_error_analysis_pipeline.py`, `sc_error_overlap_gated.py`, `sc_error_review_spreadsheet{,_v2}.py` |
+| §2.1–2.3 Data | `scripts/data_preparation/prepare_ann04062026{_SC,}_data.py` |
+| §2.4 Stage-1 gate | `scripts/evaluation/sc_cascade_step1_extract_utd_probs.py`, `sc_cascade_step1_utd_gate_leakfree.py` |
+| §2.5 Stage-2 CV | `scripts/evaluation/sc_stage2_extract_features.py`, `sc_stage2_ml_cv.py`, `sc_stage2_vetbert_cv.py` |
+| §2.6 Single-stage baselines | `scripts/training/train_evaluate_ml_ann04062026.py`, `fine_tune_on_cystitis_refined_binary.py`, `fine_tune_vetbert_dual_head.py`, `fine_tune_multiknowledge_endtoend.py`, and the matching `scripts/evaluation/evaluate_*_ann04062026_SC.py` |
+| §2.7 Two-stage pipeline | `scripts/evaluation/sc_cascade_gate_all_seeds.py`, `sc_two_stage_evaluation.py` |
+| §2.8 Stats | `scripts/evaluation/sc_shared_bootstrap_ci.py` (the paper's reported CIs: one shared set of bootstrap resamples for all systems), `sc_bootstrap_ci.py`, `sc_mcnemar_test.py` |
+| §4 Error analysis | `scripts/evaluation/sc_error_analysis.py`, `sc_error_analysis_pipeline.py`, `sc_error_overlap_gated.py`, `sc_error_review_spreadsheet{,_v2}.py` |
 
 A handful of older/exploratory scripts from the original research codebase
 (alternative architectures never reported in the paper, hyperparameter-sweep
@@ -198,14 +199,14 @@ column format and which columns are actually read.
 ## Pretrained models
 
 Checkpoints for the paper's four best-performing single-stage architectures
-(the ones fed into the two-stage pipeline evaluation, §5.4) are published at
+(the ones fed into the two-stage pipeline evaluation, §3.4) are published at
 [huggingface.co/jibmaird/sporadic-cystitis-two-stage](https://huggingface.co/jibmaird/sporadic-cystitis-two-stage):
 Multi-Knowledge Gated (seed 43), Multi-Knowledge Cross-Modal (seed 42),
 Dual-Head Cross-Attention (seed 43), and Dual-Head Weighted (seed 43). See
 [`huggingface/README.md`](huggingface/README.md) for the model card, file
 sizes, and a loading snippet.
 
-Note: the paper's Stage-2-only VetBERT result (§4.2, §5.2) comes from 5-fold
+Note: the paper's Stage-2-only VetBERT result (§2.5, §3.2) comes from 5-fold
 cross-validation, where each fold's model is trained purely to compute
 out-of-fold predictions and discarded -- there is currently no single
 checkpoint corresponding to that result (see Limitations below).
@@ -221,17 +222,17 @@ checkpoint corresponding to that result (see Limitations below).
   against the real, private annotation batch -- **numbers produced by this
   repository's synthetic data are illustrative only** and are not comparable
   to the paper's reported results.
-- The paper's Stage-2-only VetBERT result (§4.2, §5.2) comes from 5-fold
+- The paper's Stage-2-only VetBERT result (§2.5, §3.2) comes from 5-fold
   cross-validation; each fold's model is trained purely to compute
   out-of-fold predictions and discarded, so there is no purpose-built
-  Stage-2-only checkpoint, on Hugging Face or otherwise (paper §6.5,
-  Limitation #3). The four published checkpoints are single-stage models
+  Stage-2-only checkpoint, on Hugging Face or otherwise (paper §4,
+  limitations). The four published checkpoints are single-stage models
   (trained end-to-end on the full, oversampled population) that the
   two-stage pipeline gates post hoc at inference time.
 - All results are from a single private annotation batch (`ann04062026`,
-  2021 notes); no external validation on a different year, clinic, or
-  annotation source.
-- The paper's own error analysis (§6.4) finds the SC gold label itself is
+  2021 notes); no external validation on a different year, data
+  source or practice management system.
+- The paper's own error analysis (§4) finds the SC gold label itself is
   "soft": a meaningful share of positive labels rest on an antibiotic
   prescription plus a written differential diagnosis, without confirmatory
   cytology.
@@ -244,7 +245,7 @@ If you use this code in your research, please cite:
 
 ```bibtex
 @article{ncas_vet_cystitis_classifier,
-  title   = {Two-Stage Decomposition of Sporadic Cystitis Detection in Veterinary Clinical Text},
+  title   = {Sporadic Cystitis Detection in Veterinary Clinical Text},
   author  = {Martinez Iraola, David and others},
   journal = {[Journal -- to be completed]},
   year    = {2026},

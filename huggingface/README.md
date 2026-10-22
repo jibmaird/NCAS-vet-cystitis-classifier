@@ -15,8 +15,7 @@ base_model: havocy28/VetBERTDx
 
 # Sporadic Cystitis Two-Stage Detector
 
-Checkpoints accompanying the paper *"Two-Stage Decomposition of Sporadic Cystitis
-Detection in Veterinary Clinical Text."* All checkpoints fine-tune
+Checkpoints accompanying the paper *"Sporadic Cystitis Detection in Veterinary Clinical Text."* All checkpoints fine-tune
 [VetBERTDx](https://huggingface.co/havocy28/VetBERTDx) (Hur et al., 2020) to detect
 Sporadic Cystitis (SC) in free-text veterinary clinical notes.
 
@@ -32,19 +31,19 @@ The paper decomposes SC detection into two sub-problems of different difficulty:
 
 The checkpoints below are single-stage classifiers (trained end-to-end on the full,
 imbalanced population) that the paper's two-stage pipeline gates behind the Stage-1
-signal at inference time (§5.4) — the checkpoint itself is unchanged by gating; gating
+signal at inference time (§3.4) — the checkpoint itself is unchanged by gating; gating
 is applied as a post-hoc veto using a separately-computed Stage-1 score.
 
 | Architecture | Fusion strategy | Seed | File | Size | Role in paper |
 |---|---|---|---|---|---|
-| Multi-Knowledge | Gated | 43 | `mk_gated_seed43.pt` | 829 MB | Best-performing configuration overall (§5.4) |
-| Multi-Knowledge | Cross-Modal | 42 | `mk_cross_modal_seed42.pt` | 831 MB | Second fusion family, §5.4 |
-| Dual-Head | Cross-Attention | 43 | `dh_cross_attention_seed43.pt` | 828 MB | §5.4 |
-| Dual-Head | Weighted | 43 | `dh_weighted_seed43.pt` | 829 MB | §5.4 |
+| Multi-Knowledge | Gated | 43 | `mk_gated_seed43.pt` | 829 MB | Best-performing configuration overall (§3.4) |
+| Multi-Knowledge | Cross-Modal | 42 | `mk_cross_modal_seed42.pt` | 831 MB | Second fusion family, §3.4 |
+| Dual-Head | Cross-Attention | 43 | `dh_cross_attention_seed43.pt` | 828 MB | §3.4 |
+| Dual-Head | Weighted | 43 | `dh_weighted_seed43.pt` | 829 MB | §3.4 |
 
 Both fusion families combine VetBERTDx's 768-dim CLS embedding with its 39-dim
-syndrome-probability vector (§3.2); Multi-Knowledge and Dual-Head differ in how the
-two representations are combined (see paper §4.3 for architecture details).
+syndrome-probability vector (§2.5); Multi-Knowledge and Dual-Head differ in how the
+two representations are combined (see paper §2.6 for architecture details).
 
 Each file is a raw PyTorch `state_dict()` (not a wrapper dict) -- load it with the
 matching model class from the companion repository:
@@ -75,17 +74,17 @@ following institutional review of publishing weights fine-tuned on real clinical
 data. The training data itself remains private and is not released here or in the
 companion GitHub repository.
 
-Note: the paper's Stage-2-only VetBERT result (§4.2, §5.2) comes from 5-fold
+Note: the paper's Stage-2-only VetBERT result (§2.5, §3.2) comes from 5-fold
 cross-validation, where each fold's model is trained purely to compute out-of-fold
 predictions and discarded — there is no single checkpoint corresponding to that result.
 
 ## Intended use and limitations
 
 - Trained and evaluated on a single private annotation batch (`ann04062026`, 2021
-  notes); no external validation on a different year, clinic, or annotation source.
+  notes); no external validation on a different year, data source or practice management system.
 - Research use only. Not a validated clinical decision support tool — veterinary
   judgement should not be replaced by model output.
-- The paper's own error analysis (§6.4) finds the SC gold label itself is "soft": a
+- The paper's own error analysis (§4) finds the SC gold label itself is "soft": a
   meaningful share of positive labels rest on an antibiotic prescription plus a written
   differential diagnosis, without confirmatory cytology. Treat model predictions with
   the same caveat as the labels they were trained on.

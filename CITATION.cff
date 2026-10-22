@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this code, please cite the paper below (and this repository for the software itself)."
-title: "Two-Stage Decomposition of Sporadic Cystitis Detection in Veterinary Clinical Text"
+title: "Sporadic Cystitis Detection in Veterinary Clinical Text"
 type: software
 authors:
   - family-names: "Martinez Iraola"
@@ -8,7 +8,7 @@ authors:
     # TODO: add remaining co-authors before publishing
 preferred-citation:
   type: article
-  title: "Two-Stage Decomposition of Sporadic Cystitis Detection in Veterinary Clinical Text"
+  title: "Sporadic Cystitis Detection in Veterinary Clinical Text"
   authors:
     - family-names: "Martinez Iraola"
       given-names: "David"
