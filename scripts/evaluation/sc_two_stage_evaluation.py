@@ -7,6 +7,9 @@ Stage 1 -- "is this note about a urinary tract disorder (UTD) at all?"
   utd_gate_probs_SC.csv) against an is_utd ground truth built from
   test-all-syndromes.csv (is_sc OR an utd_other label is present).
   Test set: 34 positive / 466 negative (n=500).
+  The stage-1 summary holds the paper's Table 3: one row per dev-derived gate
+  plus a reference row at the test-set optimal-F1 threshold, each with its
+  pass rate and an F1 95% CI.
 
 Stage 2 -- "given it's UTD, is it specifically Sporadic Cystitis vs. a close
   clinical relative (FLUTD/FIC/recurrent cystitis/urolithiasis/etc.)?"
@@ -39,7 +42,7 @@ import os
 import sys
 import numpy as np
 import pandas as pd
-from sklearn.metrics import roc_auc_score, average_precision_score
+from sklearn.metrics import roc_auc_score, average_precision_score, f1_score, precision_recall_curve
 
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _script_dir)
@@ -138,11 +141,8 @@ def evaluate_stage1():
     sorted_sc_probs_dev = np.sort(dev_merged.loc[dev_is_sc, 'p_urinary_tract_disorder'].values)
 
     rows = []
-    print("\n  Gate thresholds selected from dev SC-positives, applied to test is_utd ground truth:")
-    for k in DROP_K_FOR_GATES:
-        if k >= len(sorted_sc_probs_dev):
-            continue
-        t = sorted_sc_probs_dev[k]
+
+    def gate_row(name, t):
         y_pred = (scores >= t).astype(int)
         tp = int(((y_true == 1) & (y_pred == 1)).sum())
         fn = int(((y_true == 1) & (y_pred == 0)).sum())
@@ -151,16 +151,37 @@ def evaluate_stage1():
         precision = tp / (tp + fp) if (tp + fp) else 0.0
         recall = tp / (tp + fn) if (tp + fn) else 0.0
         f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
-        print(f"    gate_drop{k} (t={t:.6f}): TP={tp:2d} FN={fn:2d} FP={fp:3d} TN={tn:3d}  "
-              f"P={precision:.3f} R={recall:.3f} F1={f1:.3f}")
+        # Own generator per row, so every operating point is scored on the same
+        # resamples and the AUC CIs above keep their original random stream.
+        f1_ci = bootstrap_ci_metric(pos_idx, neg_idx,
+                                    lambda idx: f1_score(y_true[idx], y_pred[idx], zero_division=0),
+                                    np.random.default_rng(BOOT_SEED))
+        pass_rate = (tp + fp) / len(y_true)
+        print(f"    {name} (t={t:.6f}): TP={tp:2d} FN={fn:2d} FP={fp:3d} TN={tn:3d}  "
+              f"P={precision:.3f} R={recall:.3f} F1={f1:.3f} [{f1_ci[0]:.3f}, {f1_ci[1]:.3f}]  pass={pass_rate:.1%}")
         rows.append({
-            'gate': f'gate_drop{k}', 'threshold': t,
+            'gate': name, 'threshold': t,
             'tp': tp, 'fn': fn, 'fp': fp, 'tn': tn,
             'precision_is_utd': precision, 'recall_is_utd': recall, 'f1_is_utd': f1,
+            'f1_ci_lower': f1_ci[0], 'f1_ci_upper': f1_ci[1], 'pass_rate': pass_rate,
             'auc_roc': auc_roc, 'auc_roc_ci_lower': auc_roc_ci[0], 'auc_roc_ci_upper': auc_roc_ci[1],
             'auc_pr': auc_pr, 'auc_pr_ci_lower': auc_pr_ci[0], 'auc_pr_ci_upper': auc_pr_ci[1],
             'n_pos': n_pos, 'n_neg': n_neg,
         })
+
+    print("\n  Gate thresholds selected from dev SC-positives, applied to test is_utd ground truth:")
+    for k in DROP_K_FOR_GATES:
+        if k >= len(sorted_sc_probs_dev):
+            continue
+        gate_row(f'gate_drop{k}', sorted_sc_probs_dev[k])
+
+    # Reference only: the threshold that maximises F1 on the test set itself
+    # (the lowest one if tied), i.e. an oracle that no deployed gate could use.
+    prec_c, rec_c, thr_c = precision_recall_curve(y_true, scores)
+    f1_c = np.divide(2 * prec_c[:-1] * rec_c[:-1], prec_c[:-1] + rec_c[:-1],
+                     out=np.zeros(len(thr_c)), where=(prec_c[:-1] + rec_c[:-1]) > 0)
+    print("\n  Reference operating point (threshold chosen on test):")
+    gate_row('test_optimal_f1', thr_c[int(np.argmax(f1_c))])
 
     out_df = pd.DataFrame(rows)
     os.makedirs(_OUTPUT_DIR, exist_ok=True)

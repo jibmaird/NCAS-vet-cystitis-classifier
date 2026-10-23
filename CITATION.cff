@@ -15,7 +15,7 @@ preferred-citation:
       # TODO: add remaining co-authors, venue, year, and DOI once the paper is public
   # TODO: fill in journal/conference, year, volume, DOI when available
 references:
-  - type: article
+  - type: conference-paper
     title: "Domain Adaptation and Instance Selection for Disease Syndrome Classification over Veterinary Clinical Notes"
     authors:
       - family-names: "Hur"
@@ -29,7 +29,10 @@ references:
       - family-names: "Gilkerson"
         given-names: "James"
     year: 2020
-    collection-title: "Proceedings of the 19th SIGBioMed Workshop on Biomedical Language Processing (BioNLP @ ACL 2020)"
+    collection-title: "Proceedings of the 19th SIGBioMed Workshop on Biomedical Language Processing (BioNLP 2020)"
+    publisher:
+      name: "Association for Computational Linguistics"
     start: 156
     end: 166
+    doi: "10.18653/v1/2020.bionlp-1.17"
     notes: "Introduces VetBERT / VetBERTDx, the base model this pipeline builds on."

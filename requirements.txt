@@ -3,7 +3,9 @@ torch>=2.0
 transformers>=4.40.0
 pandas
 numpy
-scikit-learn
+# Pinned: the paper's Stage-2 ML results were produced with 1.7.1; scikit-learn 1.8
+# shifts some random-forest / logistic-regression results in the third decimal.
+scikit-learn==1.7.1
 scipy
 joblib
 tqdm

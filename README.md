@@ -64,7 +64,9 @@ conda env create -f environment.yml && conda activate sc-two-stage
 # or: pip install -r requirements.txt
 ```
 
-Requires Python 3.11+. Models are loaded from the Hugging Face Hub at runtime
+Requires Python 3.11+. scikit-learn is pinned to 1.7.1, the version used for the
+paper's Stage-2 ML results (newer versions shift a few of them in the third
+decimal). Models are loaded from the Hugging Face Hub at runtime
 (`havocy28/VetBERTDx`), so an internet connection is needed the first time
 each script runs (weights are then cached locally).
 
@@ -88,6 +90,7 @@ python scripts/evaluation/sc_cascade_step1_extract_utd_probs.py
 python scripts/evaluation/sc_stage2_extract_features.py
 python scripts/evaluation/sc_stage2_ml_cv.py
 python scripts/evaluation/sc_stage2_vetbert_cv.py   # fine-tunes per fold; no checkpoint is saved (see Limitations)
+# --summary_only rebuilds its summary CSV from the saved fold predictions, without retraining
 
 # 5. A single-stage baseline, end to end (traditional ML, all 12 configs)
 python scripts/training/train_evaluate_ml_ann04062026.py \
@@ -171,8 +174,8 @@ repo as a package.
 | Paper section | Script(s) |
 |---|---|
 | §2.1–2.3 Data | `scripts/data_preparation/prepare_ann04062026{_SC,}_data.py` |
-| §2.4 Stage-1 gate | `scripts/evaluation/sc_cascade_step1_extract_utd_probs.py`, `sc_cascade_step1_utd_gate_leakfree.py` |
-| §2.5 Stage-2 CV | `scripts/evaluation/sc_stage2_extract_features.py`, `sc_stage2_ml_cv.py`, `sc_stage2_vetbert_cv.py` |
+| §2.4 Stage-1 gate | `scripts/evaluation/sc_cascade_step1_extract_utd_probs.py`, `sc_cascade_step1_utd_gate_leakfree.py`; Table 3 (gate operating points, pass rates, F1 CIs) comes from `sc_two_stage_evaluation.py` |
+| §2.5 Stage-2 CV | `scripts/evaluation/sc_stage2_extract_features.py`, `sc_stage2_ml_cv.py`, `sc_stage2_vetbert_cv.py` (Table 4 and Appendix A2: fold-mean F1, macro-F1 and recall, F1 and AUC-ROC CIs) |
 | §2.6 Single-stage baselines | `scripts/training/train_evaluate_ml_ann04062026.py`, `fine_tune_on_cystitis_refined_binary.py`, `fine_tune_vetbert_dual_head.py`, `fine_tune_multiknowledge_endtoend.py`, and the matching `scripts/evaluation/evaluate_*_ann04062026_SC.py` |
 | §2.7 Two-stage pipeline | `scripts/evaluation/sc_cascade_gate_all_seeds.py`, `sc_two_stage_evaluation.py` |
 | §2.8 Stats | `scripts/evaluation/sc_shared_bootstrap_ci.py` (the paper's reported CIs: one shared set of bootstrap resamples for all systems), `sc_bootstrap_ci.py`, `sc_mcnemar_test.py` |

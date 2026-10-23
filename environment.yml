@@ -10,7 +10,7 @@ dependencies:
     - transformers>=4.40.0
     - pandas
     - numpy
-    - scikit-learn
+    - scikit-learn==1.7.1   # version used for the paper's Stage-2 ML results (see requirements.txt)
     - scipy
     - joblib
     - tqdm

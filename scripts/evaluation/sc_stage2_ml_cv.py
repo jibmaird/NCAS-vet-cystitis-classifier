@@ -5,9 +5,10 @@ Stage-2 ML cross-validation: 5-fold stratified CV on the 804 is_utd records
 from sc_stage2_extract_features.py.
 
 Runs 12 ML configs (4 feature sets x {logistic, random_forest, svm}).
-Per-fold SC-class F1/precision/recall and mean ± std across folds are reported.
+Per-fold SC-class F1/precision/recall, macro-F1 and Other-UTD recall are
+averaged across folds (F1 also gets its std), as in the paper's Table 4.
 Bootstrap CIs (2000 resamples, stratified, seed=42) on pooled out-of-fold
-predictions are computed for AUC-ROC and AUC-PR.
+predictions are computed for F1(SC), AUC-ROC and AUC-PR.
 
 This is part of the paper's Result (3): SC vs other-UTD (Stage 2).
 
@@ -127,7 +128,8 @@ def main():
             key = f'{feat_name} / {clf_name}'
             print(f'  {key}')
             fold_f1, fold_prec, fold_rec = [], [], []
-            all_y, all_proba = [], []
+            fold_macro_f1, fold_rec_other = [], []
+            all_y, all_proba, all_pred = [], [], []
 
             for fold_k, (train_idx, val_idx) in enumerate(folds):
                 X_tr, X_val = X[train_idx], X[val_idx]
@@ -149,8 +151,14 @@ def main():
                 fold_f1.append(float(f1[0]))
                 fold_prec.append(float(prec[0]))
                 fold_rec.append(float(rec[0]))
+                _, rec_both, f1_both, _ = precision_recall_fscore_support(
+                    y_val, y_pred, labels=[1, 0], average=None, zero_division=0
+                )
+                fold_macro_f1.append(float(f1_both.mean()))
+                fold_rec_other.append(float(rec_both[1]))
                 all_y.append(y_val)
                 all_proba.append(proba)
+                all_pred.append(y_pred)
 
                 cm = confusion_matrix(y_val, y_pred, labels=[1, 0])
                 tp, fn, fp, tn = cm[0, 0], cm[0, 1], cm[1, 0], cm[1, 1]
@@ -159,19 +167,28 @@ def main():
 
             pool_y = np.concatenate(all_y)
             pool_proba = np.concatenate(all_proba)
+            pool_pred = np.concatenate(all_pred)
 
             auc_roc = roc_auc_score(pool_y, pool_proba)
             auc_pr = average_precision_score(pool_y, pool_proba)
             roc_lo, roc_hi = bootstrap_ci(pool_y, pool_proba, roc_auc_score, rng)
             pr_lo, pr_hi = bootstrap_ci(pool_y, pool_proba, average_precision_score, rng)
+            # Own generator, so the AUC CIs above keep their original random stream.
+            f1_lo, f1_hi = bootstrap_ci(pool_y, pool_pred,
+                                        lambda yt, yp: f1_score(yt, yp, zero_division=0),
+                                        np.random.default_rng(SEED))
 
             row = {
                 'feature_config': feat_name,
                 'classifier': clf_name,
                 'mean_f1_sc': float(np.mean(fold_f1)),
                 'std_f1_sc': float(np.std(fold_f1)),
+                'f1_sc_ci_lower': f1_lo,
+                'f1_sc_ci_upper': f1_hi,
                 'mean_precision_sc': float(np.mean(fold_prec)),
                 'mean_recall_sc': float(np.mean(fold_rec)),
+                'mean_macro_f1': float(np.mean(fold_macro_f1)),
+                'mean_recall_other': float(np.mean(fold_rec_other)),
                 'auc_roc': float(auc_roc),
                 'auc_roc_ci_lower': roc_lo,
                 'auc_roc_ci_upper': roc_hi,
@@ -180,7 +197,8 @@ def main():
                 'auc_pr_ci_upper': pr_hi,
             }
             rows.append(row)
-            print(f'    mean F1={np.mean(fold_f1):.3f} ± {np.std(fold_f1):.3f}'
+            print(f'    mean F1={np.mean(fold_f1):.3f} ± {np.std(fold_f1):.3f} [{f1_lo:.3f}, {f1_hi:.3f}]'
+                  f'  macro-F1={np.mean(fold_macro_f1):.3f}'
                   f'  AUC-ROC={auc_roc:.3f} [{roc_lo:.3f}, {roc_hi:.3f}]\n')
 
     out_df = pd.DataFrame(rows).sort_values('mean_f1_sc', ascending=False).reset_index(drop=True)
@@ -190,7 +208,7 @@ def main():
     print('=' * 65)
     print(f'Saved -> {_OUT_PATH}')
     print()
-    print(out_df[['feature_config', 'classifier', 'mean_f1_sc', 'std_f1_sc',
+    print(out_df[['feature_config', 'classifier', 'mean_f1_sc', 'std_f1_sc', 'mean_macro_f1',
                   'auc_roc', 'auc_roc_ci_lower', 'auc_roc_ci_upper']].to_string(index=False))
 
 

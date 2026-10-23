@@ -10,17 +10,20 @@ held-out records. Label convention (matching fine_tune_on_cystitis_refined_binar
   Other = 1
 
 Bootstrap CIs (2000 resamples, stratified, seed=42) are computed on the
-pooled out-of-fold predictions. This is part of the paper's Result (3):
-SC vs other-UTD (Stage 2).
+pooled out-of-fold predictions for F1(SC), AUC-ROC and AUC-PR. This is part
+of the paper's Result (3): SC vs other-UTD (Stage 2).
 
 Outputs:
   results/evaluation/ann04062026_SC/stage2_vetbert_cv/fold{k}_predictions.csv
   results/evaluation/ann04062026_SC/phase_stage2_vetbert_cv_summary.csv
 
 Requires GPU + vetbert_minimal conda env. Estimated runtime: ~2-3 h for 5 folds.
+--summary_only rebuilds the summary CSV from existing fold predictions
+(no training, no GPU).
 Usage:
-    python scripts/evaluation/sc_stage2_vetbert_cv.py
+    python scripts/evaluation/sc_stage2_vetbert_cv.py [--summary_only]
 """
+import argparse
 import os
 import sys
 import random
@@ -201,8 +204,104 @@ def bootstrap_ci(y_binary, y_score, score_fn, rng: np.random.Generator) -> tuple
     return float(np.quantile(valid, 0.025)), float(np.quantile(valid, 0.975))
 
 
+# ── Summary ───────────────────────────────────────────────────────────────────
+def write_summary(fold_rows, pool_labels, pool_prob_sc, pool_pred_sc) -> None:
+    """Aggregate per-fold rows and pooled out-of-fold predictions (1 = SC) into
+    the summary CSV: fold means, F1 std, and bootstrap CIs."""
+    rng = np.random.default_rng(SEED)
+    auc_roc = roc_auc_score(pool_labels, pool_prob_sc)
+    auc_pr = average_precision_score(pool_labels, pool_prob_sc)
+    roc_lo, roc_hi = bootstrap_ci(pool_labels, pool_prob_sc, roc_auc_score, rng)
+    pr_lo, pr_hi = bootstrap_ci(pool_labels, pool_prob_sc, average_precision_score, rng)
+    # Own generator, so the AUC CIs above keep their original random stream.
+    f1_lo, f1_hi = bootstrap_ci(pool_labels, pool_pred_sc,
+                                lambda yt, yp: f1_score(yt, yp, zero_division=0),
+                                np.random.default_rng(SEED))
+
+    f1_vals = [r['f1_sc'] for r in fold_rows]
+    prec_vals = [r['precision_sc'] for r in fold_rows]
+    rec_vals = [r['recall_sc'] for r in fold_rows]
+    macro_vals = [r['macro_f1'] for r in fold_rows]
+    rec_other_vals = [r['recall_other'] for r in fold_rows]
+
+    summary_rows = fold_rows + [{
+        'fold': 'mean',
+        'f1_sc': float(np.mean(f1_vals)),
+        'precision_sc': float(np.mean(prec_vals)),
+        'recall_sc': float(np.mean(rec_vals)),
+        'macro_f1': float(np.mean(macro_vals)),
+        'recall_other': float(np.mean(rec_other_vals)),
+        'std_f1_sc': float(np.std(f1_vals)),
+        'f1_sc_ci_lower': f1_lo,
+        'f1_sc_ci_upper': f1_hi,
+        'auc_roc': float(auc_roc),
+        'auc_roc_ci_lower': roc_lo,
+        'auc_roc_ci_upper': roc_hi,
+        'auc_pr': float(auc_pr),
+        'auc_pr_ci_lower': pr_lo,
+        'auc_pr_ci_upper': pr_hi,
+        'tp': sum(r['tp'] for r in fold_rows),
+        'fn': sum(r['fn'] for r in fold_rows),
+        'fp': sum(r['fp'] for r in fold_rows),
+        'tn': sum(r['tn'] for r in fold_rows),
+    }]
+    out_df = pd.DataFrame(summary_rows)
+    out_df.to_csv(_SUMMARY_PATH, index=False)
+
+    print('\n' + '=' * 65)
+    print(f'  5-fold summary')
+    print('=' * 65)
+    print(f'  mean F1_sc = {np.mean(f1_vals):.3f} ± {np.std(f1_vals):.3f}  95% CI [{f1_lo:.3f}, {f1_hi:.3f}]')
+    print(f'  mean P_sc  = {np.mean(prec_vals):.3f}')
+    print(f'  mean R_sc  = {np.mean(rec_vals):.3f}')
+    print(f'  macro-F1   = {np.mean(macro_vals):.3f}')
+    print(f'  AUC-ROC    = {auc_roc:.3f}  95% CI [{roc_lo:.3f}, {roc_hi:.3f}]')
+    print(f'  AUC-PR     = {auc_pr:.3f}  95% CI [{pr_lo:.3f}, {pr_hi:.3f}]')
+    print(f'\n  Saved -> {_SUMMARY_PATH}')
+
+
+def fold_row(fold_k, n_train, labels, preds) -> dict:
+    """Per-fold metrics from labels/predictions in the SC = 0 / Other = 1 convention."""
+    prec, rec, f1, _ = precision_recall_fscore_support(
+        labels, preds, labels=[SC_CLASS_IDX, 1 - SC_CLASS_IDX], average=None, zero_division=0
+    )
+    cm = confusion_matrix(labels, preds, labels=[0, 1])
+    return {
+        'fold': fold_k,
+        'n_train': n_train,
+        'n_val': len(labels),
+        'f1_sc': float(f1[0]),
+        'precision_sc': float(prec[0]),
+        'recall_sc': float(rec[0]),
+        'macro_f1': float(f1_score(labels, preds, average='macro', zero_division=0)),
+        'recall_other': float(rec[1]),
+        'tp': int(cm[0, 0]), 'fn': int(cm[0, 1]), 'fp': int(cm[1, 0]), 'tn': int(cm[1, 1]),
+    }
+
+
+def summary_from_saved_predictions() -> None:
+    fold_rows, pool_labels, pool_prob_sc, pool_pred_sc = [], [], [], []
+    n_total = sum(len(pd.read_csv(os.path.join(_PRED_DIR, f'fold{k}_predictions.csv'))) for k in range(N_FOLDS))
+    for fold_k in range(N_FOLDS):
+        pred = pd.read_csv(os.path.join(_PRED_DIR, f'fold{fold_k}_predictions.csv'))
+        labels, preds = pred['label_int'].values, pred['predicted_label'].values
+        fold_rows.append(fold_row(fold_k, n_total - len(pred), labels, preds))
+        pool_labels.append((labels == SC_CLASS_IDX).astype(int))
+        pool_prob_sc.append(pred['prob_sc'].values)
+        pool_pred_sc.append((preds == SC_CLASS_IDX).astype(int))
+    write_summary(fold_rows, np.concatenate(pool_labels), np.concatenate(pool_prob_sc),
+                  np.concatenate(pool_pred_sc))
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--summary_only', action='store_true',
+                    help='rebuild the summary CSV from existing fold predictions, without training')
+    if ap.parse_args().summary_only:
+        summary_from_saved_predictions()
+        return
+
     print('=' * 65)
     print('  Stage-2 VetBERTBinary 5-fold CV')
     print('=' * 65)
@@ -231,10 +330,9 @@ def main():
     folds = list(kf.split(np.zeros(len(y)), y))
 
     os.makedirs(_PRED_DIR, exist_ok=True)
-    rng = np.random.default_rng(SEED)
 
     fold_rows = []
-    pool_labels, pool_prob_sc = [], []
+    pool_labels, pool_prob_sc, pool_pred_sc = [], [], []
 
     for fold_k, (train_idx, val_idx) in enumerate(folds):
         print(f'\n{"─" * 60}')
@@ -320,64 +418,16 @@ def main():
             os.path.join(_PRED_DIR, f'fold{fold_k}_predictions.csv'), index=False
         )
 
-        fold_rows.append({
-            'fold': fold_k,
-            'n_train': len(train_idx),
-            'n_val': len(val_idx),
-            'f1_sc': final['f1_sc'],
-            'precision_sc': final['precision_sc'],
-            'recall_sc': final['recall_sc'],
-            'macro_f1': final['macro_f1'],
-            'tp': int(tp), 'fn': int(fn), 'fp': int(fp), 'tn': int(tn),
-        })
+        fold_rows.append(fold_row(fold_k, len(train_idx), val_labels, final['preds']))
         pool_labels.append(sc_binary)
         pool_prob_sc.append(prob_sc)
+        pool_pred_sc.append((final['preds'] == SC_CLASS_IDX).astype(int))
 
         del model
         torch.cuda.empty_cache()
 
-    # Aggregate
-    pool_labels = np.concatenate(pool_labels)
-    pool_prob_sc = np.concatenate(pool_prob_sc)
-
-    auc_roc = roc_auc_score(pool_labels, pool_prob_sc)
-    auc_pr = average_precision_score(pool_labels, pool_prob_sc)
-    roc_lo, roc_hi = bootstrap_ci(pool_labels, pool_prob_sc, roc_auc_score, rng)
-    pr_lo, pr_hi = bootstrap_ci(pool_labels, pool_prob_sc, average_precision_score, rng)
-
-    f1_vals = [r['f1_sc'] for r in fold_rows]
-    prec_vals = [r['precision_sc'] for r in fold_rows]
-    rec_vals = [r['recall_sc'] for r in fold_rows]
-
-    summary_rows = fold_rows + [{
-        'fold': 'mean',
-        'f1_sc': float(np.mean(f1_vals)),
-        'precision_sc': float(np.mean(prec_vals)),
-        'recall_sc': float(np.mean(rec_vals)),
-        'std_f1_sc': float(np.std(f1_vals)),
-        'auc_roc': float(auc_roc),
-        'auc_roc_ci_lower': roc_lo,
-        'auc_roc_ci_upper': roc_hi,
-        'auc_pr': float(auc_pr),
-        'auc_pr_ci_lower': pr_lo,
-        'auc_pr_ci_upper': pr_hi,
-        'tp': sum(r['tp'] for r in fold_rows),
-        'fn': sum(r['fn'] for r in fold_rows),
-        'fp': sum(r['fp'] for r in fold_rows),
-        'tn': sum(r['tn'] for r in fold_rows),
-    }]
-    out_df = pd.DataFrame(summary_rows)
-    out_df.to_csv(_SUMMARY_PATH, index=False)
-
-    print('\n' + '=' * 65)
-    print(f'  5-fold summary')
-    print('=' * 65)
-    print(f'  mean F1_sc = {np.mean(f1_vals):.3f} ± {np.std(f1_vals):.3f}')
-    print(f'  mean P_sc  = {np.mean(prec_vals):.3f}')
-    print(f'  mean R_sc  = {np.mean(rec_vals):.3f}')
-    print(f'  AUC-ROC    = {auc_roc:.3f}  95% CI [{roc_lo:.3f}, {roc_hi:.3f}]')
-    print(f'  AUC-PR     = {auc_pr:.3f}  95% CI [{pr_lo:.3f}, {pr_hi:.3f}]')
-    print(f'\n  Saved -> {_SUMMARY_PATH}')
+    write_summary(fold_rows, np.concatenate(pool_labels), np.concatenate(pool_prob_sc),
+                  np.concatenate(pool_pred_sc))
     print(f'  Preds  -> {_PRED_DIR}/fold{{0-4}}_predictions.csv')
 
 
