@@ -451,6 +451,8 @@ if __name__ == '__main__':
                          help='Path to validation CSV; overrides internal 80/20 split')
     _parser.add_argument('--checkpoint_name', type=str, default=None,
                          help='Filename for fixed-path best-model checkpoint under checkpoints/')
+    _parser.add_argument('--seed', type=int, default=None,
+                         help='Random seed for model init and shuffling (default: Config.seed = 42)')
     _known, _remaining = _parser.parse_known_args()
 
     if _known.train_file:
@@ -459,6 +461,8 @@ if __name__ == '__main__':
         Config.val_file = _known.val_file
     if _known.checkpoint_name:
         Config.checkpoint_name = _known.checkpoint_name
+    if _known.seed is not None:
+        Config.seed = _known.seed
 
     # Reconstruct sys.argv without the custom flags so wandb/sweep parsing still works
     sys.argv = [sys.argv[0]] + _remaining

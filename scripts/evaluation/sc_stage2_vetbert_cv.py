@@ -20,8 +20,19 @@ Outputs:
 Requires GPU + vetbert_minimal conda env. Estimated runtime: ~2-3 h for 5 folds.
 --summary_only rebuilds the summary CSV from existing fold predictions
 (no training, no GPU).
+
+Two-stage pipeline runs (sc_true_pipeline_eval.py): --seed changes the training
+seed (the fold split stays fixed at seed 42), --fold trains a single fold so the
+folds can run as parallel jobs, --out_dir keeps those runs apart from the default
+outputs, and --predict scores extra CSVs (e.g. the dev and test sets) with each
+fold's best model, so the five fold models can be used as an ensemble.
+--save_models DIR also saves each fold's best weights (state_dict) as DIR/stage2_fold{k}.pt, e.g. to publish
+the System C models.
 Usage:
     python scripts/evaluation/sc_stage2_vetbert_cv.py [--summary_only]
+    python scripts/evaluation/sc_stage2_vetbert_cv.py --seed 43 --fold 0 --out_dir DIR \
+        --predict data/ann04062026/processed/dev_binary_SC.csv data/ann04062026/processed/test_binary_SC.csv
+    python scripts/evaluation/sc_stage2_vetbert_cv.py --summary_only --out_dir DIR
 """
 import argparse
 import os
@@ -50,7 +61,7 @@ from sc_phase1_utils import PROJECT_ROOT
 MODEL_PATH = 'havocy28/VetBERTDx'
 MAX_LENGTH = 512
 N_FOLDS = 5
-SEED = 42
+SEED = 42              # fold split and bootstrap; also the default training seed
 MAX_EPOCHS = 60
 PATIENCE = 10          # early-stop patience on val macro-F1
 BATCH_SIZE = 16
@@ -293,23 +304,53 @@ def summary_from_saved_predictions() -> None:
                   np.concatenate(pool_pred_sc))
 
 
+def predict_file(model, tokenizer, device, path, fold_k) -> None:
+    """Score a CSV with `text` and `Label` columns and save P(SC) per row for this fold's model."""
+    ext = pd.read_csv(path)
+    ids, masks = tokenize(ext['text'].tolist(), tokenizer)
+    data = TensorDataset(ids, masks, torch.zeros(len(ext), dtype=torch.long))   # labels unused
+    loader = DataLoader(data, sampler=SequentialSampler(data), batch_size=BATCH_SIZE)
+    out = evaluate_fold(model, loader, device)
+    name = os.path.splitext(os.path.basename(path))[0]
+    dest = os.path.join(_PRED_DIR, f'{name}_fold{fold_k}_predictions.csv')
+    pd.DataFrame({'text': ext['text'], 'Label': ext['Label'], 'fold': fold_k,
+                  'prob_sc': out['prob_sc']}).to_csv(dest, index=False)
+    print(f'  Scored {len(ext)} records from {name} -> {dest}')
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
+    global _PRED_DIR, _SUMMARY_PATH
     ap = argparse.ArgumentParser()
     ap.add_argument('--summary_only', action='store_true',
                     help='rebuild the summary CSV from existing fold predictions, without training')
-    if ap.parse_args().summary_only:
+    ap.add_argument('--seed', type=int, default=SEED,
+                    help='training seed (model init and shuffling); the fold split stays fixed at seed 42')
+    ap.add_argument('--fold', type=int, default=None, choices=range(N_FOLDS),
+                    help='train only this fold; run --summary_only once all folds have finished')
+    ap.add_argument('--out_dir', default=None,
+                    help='write fold predictions and the summary here instead of the default locations')
+    ap.add_argument('--predict', nargs='*', default=[],
+                    help='CSVs (text, Label) to score with each fold\'s best model')
+    ap.add_argument('--save_models', default=None,
+                    help='save each fold\'s best weights (state_dict) to this directory as stage2_fold{k}.pt')
+    args = ap.parse_args()
+    if args.out_dir:
+        _PRED_DIR = args.out_dir
+        _SUMMARY_PATH = os.path.join(args.out_dir, 'phase_stage2_vetbert_cv_summary.csv')
+    if args.summary_only:
         summary_from_saved_predictions()
         return
 
     print('=' * 65)
-    print('  Stage-2 VetBERTBinary 5-fold CV')
+    print(f'  Stage-2 VetBERTBinary 5-fold CV  (training seed {args.seed}'
+          + (f', fold {args.fold} only)' if args.fold is not None else ')'))
     print('=' * 65)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'\nDevice: {device}')
 
-    set_seed(SEED)
+    set_seed(args.seed)
 
     print(f'\nLoading is_utd records from:\n  {_TRAIN_POOL}')
     df = load_is_utd_records(_TRAIN_POOL)
@@ -335,6 +376,8 @@ def main():
     pool_labels, pool_prob_sc, pool_pred_sc = [], [], []
 
     for fold_k, (train_idx, val_idx) in enumerate(folds):
+        if args.fold is not None and fold_k != args.fold:
+            continue
         print(f'\n{"─" * 60}')
         print(f'  Fold {fold_k}  ({len(train_idx)} train / {len(val_idx)} val)')
         print(f'{"─" * 60}')
@@ -352,7 +395,7 @@ def main():
             batch_size=BATCH_SIZE,
         )
 
-        set_seed(SEED + fold_k)
+        set_seed(args.seed + fold_k)
         model = VetBERTBinary(base_model_path=MODEL_PATH, device=device)
         optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
         scheduler = get_linear_schedule_with_warmup(
@@ -388,6 +431,9 @@ def main():
 
         # Reload best weights and do final eval
         model.load_state_dict({k: v.to(device) for k, v in best_state.items()})
+        if args.save_models:
+            os.makedirs(args.save_models, exist_ok=True)
+            torch.save(best_state, os.path.join(args.save_models, f'stage2_fold{fold_k}.pt'))
         final = evaluate_fold(model, val_loader, device)
 
         val_labels = y[val_idx]
@@ -423,9 +469,15 @@ def main():
         pool_prob_sc.append(prob_sc)
         pool_pred_sc.append((final['preds'] == SC_CLASS_IDX).astype(int))
 
+        for path in args.predict:
+            predict_file(model, tokenizer, device, path, fold_k)
+
         del model
         torch.cuda.empty_cache()
 
+    if args.fold is not None:
+        print(f'\n  Fold {args.fold} done -> {_PRED_DIR}; run --summary_only once all folds have finished')
+        return
     write_summary(fold_rows, np.concatenate(pool_labels), np.concatenate(pool_prob_sc),
                   np.concatenate(pool_pred_sc))
     print(f'  Preds  -> {_PRED_DIR}/fold{{0-4}}_predictions.csv')

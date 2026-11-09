@@ -6,10 +6,11 @@
 
 Reference implementation for two-stage detection of Sporadic Cystitis (SC) in
 free-text veterinary clinical notes: a frozen-model topic gate that identifies
-urinary-tract-disorder (UTD) notes, a cross-validated classifier that
-discriminates SC from clinically similar UTD conditions within that gated
-population, and the single-stage baselines (traditional ML and four
-fine-tuned fusion architectures) the two-stage pipeline is compared against.
+urinary-tract-disorder (UTD) notes, a classifier trained only on UTD notes that
+discriminates SC from clinically similar UTD conditions, and the end-to-end
+classifiers the two-stage pipeline is compared against (an SVM on frozen
+VetBERTDx features, fine-tuned VetBERTDx and Multi-Knowledge Gated fusion, plus
+the other fusion variants of the paper's exploratory sweep).
 
 This is the companion code for:
 
@@ -30,7 +31,7 @@ discrimination (which urinary condition is it?) have very different
 difficulty, but a single end-to-end classifier has to solve both at once.
 This repository decomposes them:
 
-- **Stage 1 -- UTI identification (topic recognition):** is this note about a
+- **Stage 1 -- UTD identification (topic recognition):** is this note about a
   urinary tract disorder at all? Solved near-perfectly by a frozen,
   general-purpose model (VetBERTDx) with no SC-specific training
   (AUC-ROC = 0.984).
@@ -38,11 +39,22 @@ This repository decomposes them:
   urinary case, is it Sporadic Cystitis specifically, or a clinically similar
   condition (FIC, FLUTD, urolithiasis, recurrent cystitis, urethral
   obstruction)? Tractable in isolation (CV F1 = 0.860), but unstable when
-  folded into a single end-to-end classifier trained on the full, highly
-  imbalanced population.
+  folded into a single end-to-end classifier that must also reject the many
+  non-UTD notes found at natural prevalence.
 
-Explicitly gating Stage 2 behind Stage 1 at inference time removes most of
-that instability without retraining anything (§3.4 of the paper).
+The paper compares three systems on the test set (§2.6–2.7, §3.3–3.4):
+
+- **System A -- end-to-end classifiers:** one model labels every note as SC or
+  Other, with no gate.
+- **System B -- end-to-end + UTD filter:** System A's SC predictions are kept
+  only for notes that pass Stage 1; nothing is retrained.
+- **System C -- two-stage pipeline:** only notes that pass Stage 1 reach the
+  Stage-2 classifier (fine-tuned VetBERTDx trained on UTD notes only; the
+  models from its five cross-validation folds are averaged).
+
+The end-to-end classifiers are unstable across random seeds; the filter
+(System B) removes most of that instability, and the two-stage pipeline
+(System C) is the most stable (§3.4).
 
 **This repository does not include the real annotation data.** The paper's
 dataset is private veterinary clinical data (a single annotation batch,
@@ -71,15 +83,17 @@ decimal). Models are loaded from the Hugging Face Hub at runtime
 each script runs (weights are then cached locally).
 
 Run the pipeline end to end on synthetic data (generate -> prepare labels ->
-Stage-1 gate -> Stage-2 CV -> a single-stage baseline -> two-stage stats):
+Stage-1 gate -> Stage-2 CV -> System C -> an end-to-end classifier -> stats):
 
 ```bash
 # 1. Generate fabricated raw data (~200/100/100 train/dev/test rows)
 python tools/generate_synthetic_data.py --seed 0
 
-# 2. Derive the two label schemes used throughout the paper:
-#    - binary_SC:  Sporadic Cystitis vs. Other (single-stage baselines, §2.6)
-#    - binary:     Cystitis Sporadic vs. UTD Other, is_utd records only (Stage 2, §2.5)
+# 2. Derive the two label schemes:
+#    - binary_SC:  Sporadic Cystitis vs. Other (end-to-end classifiers, Systems A and B, §2.6)
+#    - binary:     Cystitis Sporadic vs. UTD Other, counting UTD_Journey as UTD Other (an
+#                  earlier label scheme, not used for the paper's results; Stage 2, §2.5,
+#                  reads its UTD notes directly from the raw training file, without UTD_Journey)
 python scripts/data_preparation/prepare_ann04062026_SC_data.py
 python scripts/data_preparation/prepare_ann04062026_data.py
 
@@ -89,16 +103,29 @@ python scripts/evaluation/sc_cascade_step1_extract_utd_probs.py
 # 4. Stage 2 -- extract frozen features, then run the 5-fold CV suite
 python scripts/evaluation/sc_stage2_extract_features.py
 python scripts/evaluation/sc_stage2_ml_cv.py
-python scripts/evaluation/sc_stage2_vetbert_cv.py   # fine-tunes per fold; no checkpoint is saved (see Limitations)
+python scripts/evaluation/sc_stage2_vetbert_cv.py   # fine-tunes per fold; add --save_models DIR to keep the fold models
 # --summary_only rebuilds its summary CSV from the saved fold predictions, without retraining
 
-# 5. A single-stage baseline, end to end (traditional ML, all 12 configs)
+# 4b. System C (two-stage pipeline, §2.7): the same CV once per training seed (the fold
+#     split stays fixed), with every fold model also scoring dev and test; then gate ->
+#     average of the five fold models, per seed and as a soft vote across seeds
+for SEED in 42 43 44; do
+  python scripts/evaluation/sc_stage2_vetbert_cv.py --seed $SEED \
+    --out_dir results/evaluation/ann04062026_SC/true_pipeline/stage2_vetbert_seed$SEED \
+    --predict data/ann04062026/processed/dev_binary_SC.csv data/ann04062026/processed/test_binary_SC.csv
+done
+python scripts/evaluation/sc_true_pipeline_eval.py
+
+# 5. End-to-end classifiers (System A): traditional ML, all 12 configs, then their
+#    per-note test predictions (used by the statistics in step 7)
 python scripts/training/train_evaluate_ml_ann04062026.py \
   --train_file data/ann04062026/processed/train_binary_SC.csv \
   --dev_file   data/ann04062026/processed/dev_binary_SC.csv \
-  --test_file  data/ann04062026/processed/test_binary_SC.csv
+  --test_file  data/ann04062026/processed/test_binary_SC.csv \
+  --output_dir results/evaluation/ann04062026_SC --models_dir models/ml_ann04062026_SC
+python scripts/prediction/predict_ml_ann04062026_SC.py
 
-# 6. A single-stage DL baseline (example: Multi-Knowledge, Gated fusion)
+# 6. An end-to-end DL classifier (System A; example: Multi-Knowledge Gated fusion)
 python scripts/training/fine_tune_multiknowledge_endtoend.py \
   --fusion_strategy gated \
   --train_file data/ann04062026/processed/train_binary_SC.csv \
@@ -109,19 +136,25 @@ python scripts/evaluation/evaluate_multiknowledge_ann04062026_SC.py \
   --model_path checkpoints/demo_gated.pt --fusion_strategy gated \
   --test_file data/ann04062026/processed/test_binary_SC.csv
 
-# 7. Two-stage evaluation, stats
+# 7. Statistics on the end-to-end (System A) predictions: per-model bootstrap CIs
+#    and pairwise McNemar tests
 python scripts/evaluation/sc_bootstrap_ci.py
-python scripts/evaluation/sc_mcnemar_test.py
-# The paper's reported CIs come from sc_shared_bootstrap_ci.py, which needs the
-# seed-42/43/44 and ML prediction files from the full runs.
+python scripts/evaluation/sc_mcnemar_test.py --all_pairs   # without --all_pairs it compares four
+                                                           # fusion models, which this demo does not train
+# The paper's reported CIs and Tables 5-6 (System A, System B = the UTD filter on
+# System A's predictions, and System C) come from sc_shared_bootstrap_ci.py and
+# sc_systems_abc_summary.py, which need the seed-42/43/44 and ML prediction files
+# from the full runs.
 ```
 
 `fine_tune_vetbert_dual_head.py` and `fine_tune_multiknowledge_endtoend.py`
 both accept `--fusion_strategy` (`concatenation|weighted|cross_attention|
 multi_task` for Dual-Head; `attention|gated|cross_modal|hierarchical` for
-Multi-Knowledge), `--seed`, `--epochs`, and `--checkpoint_name` -- the paper's
-multi-seed runs (§3.4) are produced by calling the same script three times
-with different `--seed`/`--checkpoint_name` values, not by any code branch.
+Multi-Knowledge), `--seed`, `--epochs`, and `--checkpoint_name`;
+`fine_tune_on_cystitis_refined_binary.py` (fine-tuned VetBERTDx) accepts `--seed`
+too. The paper's multi-seed runs (§3.3–3.4) are produced by calling the same
+script three times with different `--seed`/`--checkpoint_name` values, not by
+any code branch.
 
 The three fine-tuning scripts log to [wandb](https://wandb.ai) during
 training. Without (or not wanting) a wandb account, run with
@@ -144,11 +177,14 @@ NCAS-vet-cystitis-classifier/
 │
 ├── scripts/
 │   ├── data_preparation/            Raw annotation CSVs -> (text, Label) training files
-│   ├── training/                    The 4 architecture families trained in the paper:
-│   │                                  traditional ML, VetBERTBinary, Dual-Head fusion
-│   │                                  (4 strategies), Multi-Knowledge fusion (4 strategies)
-│   ├── prediction/                  Per-record prediction generation for the ML baselines
-│   ├── evaluation/                  Stage-1 gate, Stage-2 CV, two-stage gating/evaluation,
+│   ├── training/                    The architecture families of the exploratory sweep:
+│   │                                  traditional ML, fine-tuned VetBERTDx (VetBERTBinary),
+│   │                                  Dual-Head and Multi-Knowledge fusion (4 strategies
+│   │                                  each); System A uses the SVM, fine-tuned VetBERTDx
+│   │                                  and MK Gated
+│   ├── prediction/                  Per-note predictions for the ML baselines, and System C
+│   │                                  inference on new notes (predict_two_stage.py)
+│   ├── evaluation/                  Stage-1 gate, Stage-2 CV, Systems B and C,
 │   │                                  bootstrap CIs, McNemar tests, error analysis
 │   └── testing/                     Architecture smoke tests (no data required)
 │
@@ -173,12 +209,13 @@ repo as a package.
 
 | Paper section | Script(s) |
 |---|---|
-| §2.1–2.3 Data | `scripts/data_preparation/prepare_ann04062026{_SC,}_data.py` |
+| §2.1–2.3 Data | `scripts/data_preparation/prepare_ann04062026_SC_data.py` (`prepare_ann04062026_data.py` builds the earlier `binary` label scheme, not used for the paper's results) |
 | §2.4 Stage-1 gate | `scripts/evaluation/sc_cascade_step1_extract_utd_probs.py`, `sc_cascade_step1_utd_gate_leakfree.py`; Table 3 (gate operating points, pass rates, F1 CIs) comes from `sc_two_stage_evaluation.py` |
 | §2.5 Stage-2 CV | `scripts/evaluation/sc_stage2_extract_features.py`, `sc_stage2_ml_cv.py`, `sc_stage2_vetbert_cv.py` (Table 4 and Appendix A2: fold-mean F1, macro-F1 and recall, F1 and AUC-ROC CIs) |
-| §2.6 Single-stage baselines | `scripts/training/train_evaluate_ml_ann04062026.py`, `fine_tune_on_cystitis_refined_binary.py`, `fine_tune_vetbert_dual_head.py`, `fine_tune_multiknowledge_endtoend.py`, and the matching `scripts/evaluation/evaluate_*_ann04062026_SC.py` |
-| §2.7 Two-stage pipeline | `scripts/evaluation/sc_cascade_gate_all_seeds.py`, `sc_two_stage_evaluation.py` |
+| §2.6 End-to-end classifiers (System A) | `scripts/training/train_evaluate_ml_ann04062026.py` (SVM), `fine_tune_on_cystitis_refined_binary.py` (fine-tuned VetBERTDx), `fine_tune_multiknowledge_endtoend.py` (MK Gated; other strategies for the Appendix A1 sweep), `fine_tune_vetbert_dual_head.py` (Appendix A1 sweep), and the matching `scripts/evaluation/evaluate_*_ann04062026_SC.py` |
+| §2.7 UTD filter (System B) and two-stage pipeline (System C) | System B: the filter is applied to System A's predictions in `scripts/evaluation/sc_shared_bootstrap_ci.py` and `sc_systems_abc_summary.py` (`sc_cascade_gate_all_seeds.py` does the same for an earlier four-architecture comparison); System C: `sc_stage2_vetbert_cv.py --seed --predict`, then `sc_true_pipeline_eval.py`; `scripts/prediction/predict_two_stage.py` runs System C on new notes with the published models |
 | §2.8 Stats | `scripts/evaluation/sc_shared_bootstrap_ci.py` (the paper's reported CIs: one shared set of bootstrap resamples for all systems), `sc_bootstrap_ci.py`, `sc_mcnemar_test.py` |
+| §3.3–3.4 Tables 5–6 | `scripts/evaluation/sc_systems_abc_summary.py` (F1 with shared CIs, false positives on non-UTD notes, McNemar tests between systems, overlap with the reviewed errors) |
 | §4 Error analysis | `scripts/evaluation/sc_error_analysis.py`, `sc_error_analysis_pipeline.py`, `sc_error_overlap_gated.py`, `sc_error_review_spreadsheet{,_v2}.py` |
 
 A handful of older/exploratory scripts from the original research codebase
@@ -201,18 +238,32 @@ column format and which columns are actually read.
 
 ## Pretrained models
 
-Checkpoints for the paper's four best-performing single-stage architectures
-(the ones fed into the two-stage pipeline evaluation, §3.4) are published at
+The System C models are published in the `system_c_seed42/` folder of
 [huggingface.co/jibmaird/sporadic-cystitis-two-stage](https://huggingface.co/jibmaird/sporadic-cystitis-two-stage):
-Multi-Knowledge Gated (seed 43), Multi-Knowledge Cross-Modal (seed 42),
-Dual-Head Cross-Attention (seed 43), and Dual-Head Weighted (seed 43). See
-[`huggingface/README.md`](huggingface/README.md) for the model card, file
-sizes, and a loading snippet.
+the five Stage-2 fold models for training seed 42, with a `config.json` recording the gate
+threshold and the decision rule. To label your own notes with System C:
 
-Note: the paper's Stage-2-only VetBERT result (§2.5, §3.2) comes from 5-fold
-cross-validation, where each fold's model is trained purely to compute
-out-of-fold predictions and discarded -- there is currently no single
-checkpoint corresponding to that result (see Limitations below).
+```bash
+python scripts/prediction/predict_two_stage.py --input notes.csv --output predictions.csv \
+  --hf_repo jibmaird/sporadic-cystitis-two-stage
+```
+
+The input CSV needs a `text` column. The output adds P(UTD), the gate decision, the averaged
+SC probability and the label. On the paper's test set these models reproduce the paper's
+System C seed-42 results exactly (F1(SC) 0.756, Table 6).
+
+The same repository also holds four end-to-end classifiers:
+- Multi-Knowledge Gated (seed 43; a System A classifier in the paper, §2.6);
+- Multi-Knowledge Cross-Modal (seed 42; exploratory sweep, Appendix A1);
+- Dual-Head Cross-Attention and Dual-Head Weighted (seed 43; from an earlier multi-seed
+  comparison that the revised paper no longer reports).
+
+See [`huggingface/README.md`](huggingface/README.md) for the model card, file sizes, and a
+loading snippet.
+
+Note: the paper's Stage-2 cross-validation result (§2.5, §3.2) and System C's seeds 43 and 44
+come from fold models that were not saved. `sc_stage2_vetbert_cv.py --save_models DIR` saves
+the fold models of a new run.
 
 ---
 
@@ -225,13 +276,13 @@ checkpoint corresponding to that result (see Limitations below).
   against the real, private annotation batch -- **numbers produced by this
   repository's synthetic data are illustrative only** and are not comparable
   to the paper's reported results.
-- The paper's Stage-2-only VetBERT result (§2.5, §3.2) comes from 5-fold
-  cross-validation; each fold's model is trained purely to compute
-  out-of-fold predictions and discarded, so there is no purpose-built
-  Stage-2-only checkpoint, on Hugging Face or otherwise (paper §4,
-  limitations). The four published checkpoints are single-stage models
-  (trained end-to-end on the full, oversampled population) that the
-  two-stage pipeline gates post hoc at inference time.
+- Only System C's seed-42 fold models are published; the fold models behind the paper's
+  Stage-2 cross-validation result and System C's seeds 43 and 44 were not saved. GPU
+  training is not exactly reproducible, so retraining the same seed can give slightly
+  different models (the paper's limitations report a 0.035 difference in test F1(SC) for
+  seed 42). The four end-to-end checkpoints were trained on all 1,200 UTD-enriched training
+  notes; the paper's System B filters the predictions of such classifiers with the Stage-1
+  gate.
 - All results are from a single private annotation batch (`ann04062026`,
   2021 notes); no external validation on a different year, data
   source or practice management system.

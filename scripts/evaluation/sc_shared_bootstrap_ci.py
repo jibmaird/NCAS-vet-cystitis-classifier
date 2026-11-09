@@ -8,9 +8,10 @@ system from a running generator, so identical predictions could get different CI
 resample indices are drawn once and reused, so identical predictions always give identical CIs
 and every interval refers to the same resamples.
 
-Covers: the 18 seed-42 single-stage systems (Table 5 / Appendix A1) and, for the four re-run
-architectures, seeds 42/43/44 and the 3-seed soft vote, ungated and at gate_thr0/gate_thr1
-(Table 6).
+Covers: the 18 seed-42 single-stage systems (Table 5 / Appendix A1) and, for the re-run
+architectures (the four fusion models plus fine-tuned VetBERT), seeds 42/43/44 and the 3-seed
+soft vote, ungated and at gate_thr0/gate_thr1 (Table 6). If sc_true_pipeline_eval.py has been
+run, also the true two-stage pipeline (gate -> Stage-2 VetBERT) for each seed and the soft vote.
 
 Usage: python scripts/evaluation/sc_shared_bootstrap_ci.py [--n_bootstrap 2000] [--seed 42]
 """
@@ -38,8 +39,12 @@ DL_SEED42 = ['cross_modal', 'dualhead_cross_attention', 'dualhead_weighted', 'ga
 ML_SEED42 = ['syndromes_only_svm', 'hybrid_equal_svm', 'embeddings_only_svm', 'hybrid_equal_random_forest',
              'embeddings_only_random_forest', 'embeddings_only_logistic', 'hybrid_equal_logistic',
              'syndromes_only_logistic', 'syndromes_only_random_forest']
-RERUN_ARCHS = ['gated', 'cross_modal', 'dualhead_cross_attention', 'dualhead_weighted']
+ML_GATED = ['embeddings_only_svm']   # selected on development macro-F1 (Section 2.6)
+RERUN_ARCHS = ['gated', 'cross_modal', 'dualhead_cross_attention', 'dualhead_weighted', 'vetbert_finetune']
 SEEDS = [42, 43, 44]
+TRUE_PIPELINE_DIR = os.path.join(RES, 'ann04062026_SC/true_pipeline')
+TRUE_PIPELINE_RUNS = ['seed42', 'seed43', 'seed44', 'soft_vote']
+TRUE_PIPELINE_METHODS = ['gate_thr0', 'gate_thr1', 'no_gate']
 
 
 def main():
@@ -96,8 +101,11 @@ def main():
     for s in DL_SEED42:
         add(s, 'seed42', 'ungated', aligned(os.path.join(PRED_DIRS[42], f'predictions_{s}_SC.csv'))['predicted_label'].values)
     for s in ML_SEED42:
-        add('ml_' + s, 'seed42', 'ungated',
-            aligned(os.path.join(ML_DIR, f'predictions_ml_{s}_SC.csv'))['predicted_label'].values)
+        y_pred = aligned(os.path.join(ML_DIR, f'predictions_ml_{s}_SC.csv'))['predicted_label'].values
+        add('ml_' + s, 'seed42', 'ungated', y_pred)
+        if s in ML_GATED:  # System B for the traditional-ML classifier kept in the main text
+            for g, t in gates.items():
+                add('ml_' + s, 'seed42', g, np.where(p_utd >= t, y_pred, NEGATIVE_LABEL))
 
     for arch in RERUN_ARCHS:
         dfs = {seed: aligned(os.path.join(PRED_DIRS[seed], f'predictions_{arch}_SC.csv')) for seed in SEEDS}
@@ -109,6 +117,15 @@ def main():
                 add(arch, run, 'ungated', y_pred)
             for g, t in gates.items():
                 add(arch, run, g, np.where(p_utd >= t, y_pred, NEGATIVE_LABEL))
+
+    # True two-stage pipeline (gate -> Stage-2 VetBERT); its gating is already in the predictions.
+    tp_files = {(r, m): os.path.join(TRUE_PIPELINE_DIR, f'predictions_true_pipeline_{r}_{m}_SC.csv')
+                for r in TRUE_PIPELINE_RUNS for m in TRUE_PIPELINE_METHODS}
+    if all(os.path.exists(f) for f in tp_files.values()):
+        for (run, method), f in tp_files.items():
+            add('true_pipeline_vetbert', run, method, aligned(f)['predicted_label'].values)
+    else:
+        print('true-pipeline predictions not found; run sc_true_pipeline_eval.py to include them')
 
     out = pd.DataFrame(rows)
     out.to_csv(args.output_file, index=False)

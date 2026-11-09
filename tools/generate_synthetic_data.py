@@ -11,7 +11,7 @@ by combining template sentence fragments. No real clinical note, patient
 record, or identifier appears anywhere in this script or its output.
 
 This exists so the rest of the codebase (data preparation, Stage-1 gate,
-Stage-2 CV, single-stage baselines, two-stage evaluation) can be run and
+Stage-2 CV, end-to-end classifiers, Systems B and C) can be run and
 inspected end-to-end without access to the private, real annotation data.
 Numbers produced from this synthetic data are meaningless and will not
 resemble the paper's reported results -- they only demonstrate that the

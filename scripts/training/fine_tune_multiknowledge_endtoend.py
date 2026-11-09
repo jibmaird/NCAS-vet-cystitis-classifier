@@ -744,6 +744,10 @@ if __name__ == '__main__':
         help='Random seed for model init / training (default: 42)'
     )
     parser.add_argument(
+        '--epochs', type=int, default=None,
+        help='Number of training epochs (default: Config.epochs = 40, as in the paper)'
+    )
+    parser.add_argument(
         '--diagnostic_dir', type=str, default=None,
         help='If set, save a checkpoint + dev metrics for every epoch up to '
              '--diagnostic_max_epoch under this directory (for post-hoc '
@@ -765,6 +769,8 @@ if __name__ == '__main__':
     if args.checkpoint_name:
         Config.checkpoint_name = args.checkpoint_name
     Config.seed = args.seed
+    if args.epochs is not None:
+        Config.epochs = args.epochs
     Config.diagnostic_dir = args.diagnostic_dir
     Config.diagnostic_max_epoch = args.diagnostic_max_epoch
 

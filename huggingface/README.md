@@ -23,27 +23,57 @@ Sporadic Cystitis (SC) in free-text veterinary clinical notes.
 
 The paper decomposes SC detection into two sub-problems of different difficulty:
 
-- **Stage 1 — UTI identification:** is the note about a urinary tract disorder at all?
+- **Stage 1 — UTD identification:** is the note about a urinary tract disorder at all?
   Solved by a frozen, general-purpose VetBERTDx signal with no SC-specific training.
 - **Stage 2 — SC vs. Other-UTD:** given a urinary case, is it Sporadic Cystitis
   specifically, or a clinically similar condition (FIC, FLUTD, urolithiasis, recurrent
   cystitis, urethral obstruction)?
 
-The checkpoints below are single-stage classifiers (trained end-to-end on the full,
-imbalanced population) that the paper's two-stage pipeline gates behind the Stage-1
-signal at inference time (§3.4) — the checkpoint itself is unchanged by gating; gating
-is applied as a post-hoc veto using a separately-computed Stage-1 score.
+### System C: two-stage pipeline (`system_c_seed42/`)
+
+The folder `system_c_seed42/` holds the paper's System C models for training seed 42:
+- the five Stage-2 fold models (`stage2_fold0.pt` to `stage2_fold4.pt`, about 434 MB each);
+- `config.json`, which records the gate threshold, the decision rule and the training settings.
+
+Each fold model is VetBERTDx with a new SC head, fine-tuned only on UTD notes (SC vs
+Other-UTD) in one fold of a 5-fold cross-validation over the 804 UTD training notes.
+System C was the most stable of the paper's three systems across training runs (§3.4).
+
+To label a note, System C:
+1. computes P(UTD) with the frozen, released VetBERTDx, and lets the note through if
+   P(UTD) ≥ 0.00028190302 (the paper's gate_thr1, set on the development set);
+2. averages the SC probabilities of the five fold models for the notes that pass;
+3. labels a note SC when it passes and the average is at least 0.5, and Other otherwise.
+
+On the paper's test set (500 notes at natural prevalence, 21 SC), this gives F1(SC) 0.756
+(95% CI 0.622–0.884; 17 TP, 7 FP, 4 FN; Table 6 of the paper). The paper also reports seeds
+43 and 44 and their soft vote; those fold models are not published.
+
+`scripts/prediction/predict_two_stage.py` in the companion repository runs the whole pipeline:
+
+```bash
+python scripts/prediction/predict_two_stage.py --input notes.csv --output predictions.csv \
+    --hf_repo jibmaird/sporadic-cystitis-two-stage --hf_subfolder system_c_seed42
+```
+
+### End-to-end classifiers
+
+The four checkpoints below are end-to-end classifiers, of the kind used in the paper's
+System A: trained on all 1,200 training notes to predict SC vs Other. In the paper's System B,
+the SC predictions of such classifiers are filtered with the Stage-1 gate (§2.7, §3.4) — the
+checkpoint itself is unchanged; the filter is a post-hoc veto using a separately computed
+Stage-1 score.
 
 | Architecture | Fusion strategy | Seed | File | Size | Role in paper |
 |---|---|---|---|---|---|
-| Multi-Knowledge | Gated | 43 | `mk_gated_seed43.pt` | 829 MB | Best-performing configuration overall (§3.4) |
-| Multi-Knowledge | Cross-Modal | 42 | `mk_cross_modal_seed42.pt` | 831 MB | Second fusion family, §3.4 |
-| Dual-Head | Cross-Attention | 43 | `dh_cross_attention_seed43.pt` | 828 MB | §3.4 |
-| Dual-Head | Weighted | 43 | `dh_weighted_seed43.pt` | 829 MB | §3.4 |
+| Multi-Knowledge | Gated | 43 | `mk_gated_seed43.pt` | 829 MB | System A classifier (§2.6); best System B run (§3.4) |
+| Multi-Knowledge | Cross-Modal | 42 | `mk_cross_modal_seed42.pt` | 831 MB | Exploratory sweep (Appendix A1) |
+| Dual-Head | Cross-Attention | 43 | `dh_cross_attention_seed43.pt` | 828 MB | Earlier multi-seed comparison; the paper reports only seed 42 (Appendix A1) |
+| Dual-Head | Weighted | 43 | `dh_weighted_seed43.pt` | 829 MB | Earlier multi-seed comparison; the paper reports only seed 42 (Appendix A1) |
 
 Both fusion families combine VetBERTDx's 768-dim CLS embedding with its 39-dim
-syndrome-probability vector (§2.5); Multi-Knowledge and Dual-Head differ in how the
-two representations are combined (see paper §2.6 for architecture details).
+syndrome-probability vector; Multi-Knowledge and Dual-Head differ in how the two
+representations are combined (see paper §2.6 for MK Gated and Appendix A1 for the others).
 
 Each file is a raw PyTorch `state_dict()` (not a wrapper dict) -- load it with the
 matching model class from the companion repository:
@@ -68,15 +98,15 @@ For Dual-Head checkpoints, use `VetBERTDualHead` from
 
 ## Status
 
-**Published.** All four checkpoints and this model card are live at
-[huggingface.co/jibmaird/sporadic-cystitis-two-stage](https://huggingface.co/jibmaird/sporadic-cystitis-two-stage),
-following institutional review of publishing weights fine-tuned on real clinical
-data. The training data itself remains private and is not released here or in the
-companion GitHub repository.
+**Published** at
+[huggingface.co/jibmaird/sporadic-cystitis-two-stage](https://huggingface.co/jibmaird/sporadic-cystitis-two-stage).
+The four end-to-end checkpoints were published following institutional review of publishing
+weights fine-tuned on real clinical data; the System C models, trained on the same data, were
+added on 9 November 2026. The training data itself remains private and is not released here
+or in the companion GitHub repository.
 
-Note: the paper's Stage-2-only VetBERT result (§2.5, §3.2) comes from 5-fold
-cross-validation, where each fold's model is trained purely to compute out-of-fold
-predictions and discarded — there is no single checkpoint corresponding to that result.
+Note: the paper's Stage-2 cross-validation result (§2.5, §3.2) and System C's seeds 43 and 44
+come from fold models that were not saved, so no checkpoint for them is published.
 
 ## Intended use and limitations
 
